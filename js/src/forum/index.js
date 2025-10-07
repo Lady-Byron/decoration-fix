@@ -1,99 +1,73 @@
+// lady-byron/decoration-fix — forum entry
+// 逻辑等同于你提供的 <script>：保持装饰返回对象，给其补 toJSON/toString 便于序列化
+
 import app from 'flarum/forum/app';
 
-const LOG = '[decoration-fix v1]';
-
-/**
- * A) displayName 适配器：
- *    - 渲染阶段保留 user-decoration 的富对象/装饰
- *    - 序列化阶段（JSON.stringify / ''+obj）返回纯字符串，避免环引用
- */
-function installDisplayNameAdapter() {
+function installAdapter() {
   try {
-    const compat = window.flarum?.core?.compat || window.flarum?.compat || {};
+    const compat =
+      (window.flarum && (window.flarum.core?.compat || window.flarum.compat)) || {};
     const UserMod = compat['models/User'] || compat['common/models/User'];
     const User = UserMod && (UserMod.default || UserMod);
-    if (!User || User.prototype.__lb_df_dn_patched) return;
+
+    if (!User) {
+      // 初始化时序未就绪，稍后重试
+      setTimeout(installAdapter, 120);
+      return;
+    }
+
+    if (User.prototype.__lb_dn_patched) return;
 
     const orig = User.prototype.displayName;
 
     User.prototype.displayName = function () {
+      // 先拿到（可能被 user-decoration 改造过的）“富对象”
       let v;
       try {
         v = orig ? orig.call(this) : (this.username?.() ?? this.attribute?.('username'));
       } catch (e) {}
 
-      // 已是字符串：直接返回
+      // 已经是字符串则原样返回
       if (typeof v === 'string') return v;
 
-      // 若是对象（被 user-decoration 包装），为其加 toJSON/toString
+      // 如果是对象（常见：被 user-decoration 包装）
       if (v && typeof v === 'object') {
-        // 只从原始字段取“纯文本名”；避免再次调用 displayName 造成递归
+        // 取纯文本名用于序列化兜底（避免再次递归 displayName）
         const text =
           this.attribute?.('displayName') ||
           this.username?.() ||
           this.attribute?.('username') ||
           '';
 
-        try { Object.defineProperty(v, 'toJSON',  { value: () => text, configurable: true }); }
-        catch { v.toJSON  = () => text; }
+        // 给对象打上 toJSON / toString，JSON.stringify 或 ''+obj 时会用
+        try {
+          Object.defineProperty(v, 'toJSON', { value: () => text, configurable: true });
+        } catch (e) {
+          v.toJSON = () => text;
+        }
 
         if (!v.toString || v.toString === Object.prototype.toString) {
-          try { Object.defineProperty(v, 'toString', { value: () => text, configurable: true }); }
-          catch { v.toString = () => text; }
+          try {
+            Object.defineProperty(v, 'toString', { value: () => text, configurable: true });
+          } catch (e) {
+            v.toString = () => text;
+          }
         }
       }
+
       return v;
     };
 
-    User.prototype.__lb_df_dn_patched = true;
-    // eslint-disable-next-line no-console
-    console.log(LOG, 'displayName adapter installed');
+    User.prototype.__lb_dn_patched = true;
+    // 可选：调试日志
+    // console.log('[decoration-fix] displayName adapter installed');
   } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn(LOG, 'displayName adapter error, retrying…', e);
-    setTimeout(installDisplayNameAdapter, 120);
+    // 兜底重试（初始化顺序不确定）
+    setTimeout(installAdapter, 120);
   }
 }
 
-/**
- * B) Typing 兜底：
- *    - 仅在 {event:'client-typing', data:{…}} 被 stringify 时，确保 displayName 为字符串
- *    - 不影响其他 JSON.stringify 用途
- */
-function installTypingGuard() {
-  if (JSON.stringify.__lb_df_guard) return;
-  const _stringify = JSON.stringify;
-
-  const isTypingRoot = (val) =>
-    val && typeof val === 'object' &&
-    'event' in val && 'data' in val &&
-    String(val.event || '').toLowerCase().includes('typing');
-
-  JSON.stringify = function (val, replacer, space) {
-    try {
-      if (isTypingRoot(val) && replacer === undefined) {
-        const data = { ...(val.data || {}) };
-        if (typeof data.displayName !== 'string') {
-          try {
-            // 优先使用对象自带的 toJSON（由上方适配器提供），否则再兜底转字符串
-            data.displayName =
-              (data.displayName && data.displayName.toJSON && data.displayName.toJSON()) ||
-              String(data.displayName || '');
-          } catch {
-            data.displayName = '';
-          }
-        }
-        return _stringify.call(this, { event: val.event, data }, undefined, space);
-      }
-    } catch { /* ignore */ }
-    return _stringify.call(this, val, replacer, space);
-  };
-  JSON.stringify.__lb_df_guard = true;
-  // eslint-disable-next-line no-console
-  console.log(LOG, 'typing guard installed');
-}
-
 app.initializers.add('lady-byron-decoration-fix', () => {
-  installDisplayNameAdapter();
-  installTypingGuard();
+  // 与页眉脚本一致：只打适配器，不改变其它逻辑
+  installAdapter();
 });
