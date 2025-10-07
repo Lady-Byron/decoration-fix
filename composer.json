@@ -1,0 +1,24 @@
+{
+  "name": "lady-byron/decoration-fix",
+  "description": "Keep user-decoration UI while making User.displayName safely serializable; adds a typing guard for Realtime.",
+  "type": "flarum-extension",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "LadyByron\\DecorationFix\\": "src/"
+    }
+  },
+  "extra": {
+    "flarum-extension": {
+      "title": "Decoration Fix (displayName adapter)",
+      "category": "feature",
+      "frontend": {
+        "forum": {
+          "js": [
+            "js/dist/forum.js"
+          ]
+        }
+      }
+    }
+  }
+}
