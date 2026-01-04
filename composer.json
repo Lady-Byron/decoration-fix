@@ -10,7 +10,7 @@
   },
   "extra": {
     "flarum-extension": {
-      "title": "Decoration Fix (displayName adapter)",
+      "title": "Decoration Fix",
       "category": "feature",
       "frontend": {
         "forum": {
